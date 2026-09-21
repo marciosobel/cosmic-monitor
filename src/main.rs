@@ -1094,10 +1094,10 @@ impl App {
                 .into()
             }
             DashboardLayout::Small => {
-                // Top apps/processes as column above graphs
+                // Graphs above top apps/processes as column
                 widget::column!(
+                    column,
                     widget::column::with_children(list_cards).spacing(space_s),
-                    column
                 )
                 .spacing(space_s)
                 .into()

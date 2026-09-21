@@ -128,6 +128,7 @@ pub struct LinuxPlatform {
     gpu_energies: HashMap<GpuId, (Instant, u64)>,
     gpu_items: Vec<GpuItem>,
     nvml: Box<dyn Platform>,
+    pci_db: pciid_parser::Database,
     processes: HashMap<Pid, LinuxProcess>,
     version: u64,
 }
@@ -188,6 +189,17 @@ impl LinuxPlatform {
             _ => a.name.cmp(&b.name),
         });
 
+        let pci_db = match pciid_parser::Database::read() {
+            Ok(db) => db,
+            Err(err) => {
+                log::warn!("failed to read PCI ID database: {}", err);
+                pciid_parser::Database {
+                    vendors: HashMap::new(),
+                    classes: HashMap::new(),
+                }
+            }
+        };
+
         Self {
             amdgpu_ids,
             app_entries,
@@ -197,6 +209,7 @@ impl LinuxPlatform {
             nvml: Box::new(super::nvml::NvmlPlatform::new()),
             #[cfg(not(feature = "nvml"))]
             nvml: Box::new(super::FallbackPlatform),
+            pci_db,
             processes: HashMap::new(),
             version: 0,
         }
@@ -326,16 +339,18 @@ impl Platform for LinuxPlatform {
                             return Ok(name.to_string());
                         }
                     }
-                    if let Some(entry) = pci_ids::Device::from_vid_pid(vendor_id, device_id) {
+                    if let Some(vendor) = self.pci_db.vendors.get(&vendor_id)
+                        && let Some(device) = vendor.devices.get(&device_id)
+                    {
                         Ok(format!(
                             "{} {}",
                             match vendor_id {
                                 0x1002 | 0x1022 => "AMD",
                                 0x10DE => "NVIDIA",
                                 0x8086 => "Intel",
-                                _ => entry.vendor().name(),
+                                _ => vendor.name.as_str(),
                             },
-                            entry.name()
+                            device.name
                         ))
                     } else {
                         Err(format!("no entry for {:04x}:{:04x}", vendor_id, device_id).into())
@@ -346,7 +361,7 @@ impl Platform for LinuxPlatform {
                 let name = match name_from_pci_ids() {
                     Ok(ok) => ok,
                     Err(err) => {
-                        log::warn!("failed to get name from PCI IDs: {}", err);
+                        log::warn!("failed to get name from PCI ID database: {}", err);
                         format!("Unknown GPU {}", id)
                     }
                 };
